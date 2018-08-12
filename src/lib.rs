@@ -1,97 +1,66 @@
 #[macro_use]
 pub mod macros;
 
-#[macro_use]
-extern crate failure;
-
 use std::process::{ Command, Output, ExitStatus };
-use failure::Error;
-use std::borrow::Cow;
-use std::fmt::{ Display, Formatter};
-use std::ffi::OsString;
-
+use std::ffi::{OsString, OsStr};
+use std::io::Error;
 
 #[derive(Clone, Debug)]
-pub struct Commandant<T : Into<OsString> + Clone> {
-    command: T,
-    args: Vec<T>
+pub struct Commandant {
+    command: OsString,
+    args: Vec<OsString>
 }
 
-impl<T> Commandant<T>
-where T: Into<OsString> + Clone
-{
-    pub fn new(command: T, args: &[T]) -> Commandant<T> {
-            Commandant {
-            command,
-            args: args.to_vec()
+impl Commandant {
+    pub fn new<T>(command: T, args: &[T]) -> Commandant
+        where T: Into<OsString> + Clone
+    {
+        Commandant {
+            command: command.into(),
+            args: args.into_iter().map(|arg| arg.clone().into()).collect()
         }
     }
 
-    pub fn run(&self) -> Result<OutputBag, Error> {
+    pub fn run(&self) -> OutputBag {
+        OutputBag::from(&self.command, &self.args)
     }
 }
 
-
+#[derive(Debug)]
 pub struct OutputBag {
-    output: Result<Output, CommandError>
+    output: Result<Output, Error>
 }
 
 impl OutputBag
 {
-    pub fn from<T: std::convert::AsRef<std::ffi::OsStr>>(command: T, args: &[T]) -> OutputBag {
+    pub fn from<T: AsRef<OsStr>>(command: &T, args: &[T]) -> OutputBag {
         OutputBag {
-            output: Command::new(&command)
+            output: Command::new(command)
                 .args(args)
                 .output()
-        }.into()
-    }
-
-    pub fn status(&self) -> ExitStatus {
-        self.output.status
-    }
-
-    pub fn output(&self) -> Cow<str> {
-        String::from_utf8_lossy(&self.output.stdout)
-    }
-
-    pub fn errors(&self) -> Cow<str> {
-        String::from_utf8_lossy(&self.output.stderr)
-    }
-}
-
-impl<'a> Into<Result<Cow<'a, str>, CommandError>> for OutputBag
-{
-    fn into(self) -> Result<Cow<'a, str>, CommandError> {
-        if self.output.status().success {
-           Ok(self.output())
-        } else {
-            Err(CommandError { status: self.output.status, message: self.errors()})
         }
-
     }
-}
 
-#[derive(Clone, Debug, Fail)]
-pub struct RunError {
-    status: ExitStatus,
-    message: String
-}
+    pub fn status(self) -> Result<ExitStatus, Error> {
+        Ok(self.output?.status)
+    }
 
-#[derive(Fail, Debug)]
-#[fail(display = "command has encountered an error")]
-pub struct CommandError(#[fail(cause)] RunError, #[fail(cause)] std::io::Error);
+    pub fn output(self) -> Result<String, Error> {
+        let stdout = self.output?.stdout;
+        Ok(String::from_utf8_lossy(&stdout).into_owned())
+    }
 
-
-impl Display for RunError{
-    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
-        write!(f, "{}:{}",  self.status, self.message)
+    pub fn errors(self) -> Result<String, Error> {
+        let stderr = self.output?.stderr;
+        Ok(String::from_utf8_lossy(&stderr).into_owned())
     }
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn new_commandant() {
+        let commandant = super::Commandant::new("echo", &vec!["1"]).run();
+        assert_eq!(commandant.output().unwrap(), "1\n");
     }
 }
